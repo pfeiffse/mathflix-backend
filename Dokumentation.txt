@@ -1,0 +1,239 @@
+JA! 🎉 Super – dann lass uns kurz durchatmen und **das Ganze sauber dokumentiert festhalten**.  
+Hier ist die **komplette Übersicht** über **Ziel**, **Architektur**, **Ordnerstruktur**, **Docker-Setup** und **die wichtigsten technischen Entscheidungen**, die wir gemeinsam getroffen haben.
+
+***
+
+# ✅ Überblick: Unterrichtsplanung‑App – aktueller Stand
+
+## 🎯 Gesamtziel
+
+Du hast jetzt ein **lokal lauffähiges, sauberes Full‑Stack‑Projekt** mit:
+
+*   **FastAPI‑Backend** (async, SQLModel, SQLite)
+*   **Frontend** (statisch, via NGINX ausgeliefert)
+*   **NGINX Reverse Proxy**
+    *   `/` → Frontend
+    *   `/api` → Backend
+*   **Docker Compose** als Orchestrierung
+*   **Sauberer Projektaufbau**, der auch für Produktion geeignet ist
+*   **Vorbereitung für HTTPS (Certbot)**
+
+***
+
+## 🧱 Zielarchitektur (logisch)
+
+    Browser
+      │
+      ├── http://localhost/
+      │       → Frontend (HTML/CSS/JS)
+      │
+      └── http://localhost/api/...
+              → NGINX → FastAPI Backend
+                              │
+                              └── SQLite DB
+
+👉 **Ein einziger Einstiegspunkt** (Port 80 / später 443)  
+👉 **Kein direkter Zugriff auf den Backend-Port von außen** (Best Practice)
+
+***
+
+## 📁 Projektstruktur (IST‑Zustand)
+
+    Unterrichtsplanung-App/
+    ├── app/                    # Backend-Code (Python)
+    │   ├── main.py             # FastAPI App + Startup
+    │   ├── db.py               # Async DB-Konfiguration + init_db
+    │   │
+    │   ├── core/               # Zentrale Infrastruktur
+    │   │   ├── settings.py     # App-Konfiguration
+    │   │   ├── eventbus.py     # EventBus
+    │   │   ├── middleware_events.py
+    │   │   └── middleware_persist.py
+    │   │
+    │   ├── models/             # SQLModel Datenmodelle
+    │   ├── services/           # Business-Logik
+    │   ├── routers/            # FastAPI Router (API-Endpunkte)
+    │   ├── auth/               # Authentifizierung
+    │   ├── agents/             # Analyse-/KI-Logik
+    │   ├── pipelines/          # Event-/Verarbeitungspipelines
+    │   └── __init__.py
+    │
+    ├── frontend/               # Frontend (statisch)
+    │   ├── index.html
+    │   ├── assets/
+    │   └── ...
+    │
+    ├── data/                   # ✅ SQLite-Datenbank (NEU & WICHTIG)
+    │   └── database.db
+    │
+    ├── docker/
+    │   ├── backend/
+    │   │   └── Dockerfile
+    │   ├── frontend/
+    │   │   └── Dockerfile
+    │   └── nginx/
+    │       ├── Dockerfile
+    │       ├── nginx.conf
+    │       └── certbot/        # Vorbereitung für HTTPS
+    │
+    ├── docker-compose.yml
+    └── requirements.txt
+
+***
+
+## 🐍 Backend – wichtige Entscheidungen
+
+### 1️⃣ **Flat‑Import‑Struktur**
+
+Wir haben **bewusst KEIN `app.`‑Python‑Package mehr**.
+
+✅ Richtig:
+
+```python
+from db import init_db
+from models.user import User
+from services.material_service import MaterialService
+```
+
+❌ Verworfen:
+
+```python
+from app.db import init_db
+```
+
+👉 Vorteil:
+
+*   einfacher
+*   weniger Python‑Importprobleme
+*   klarere Struktur im Container
+
+***
+
+### 2️⃣ **Async SQLModel + SQLite (korrekt!)**
+
+**db.py** (vereinfacht):
+
+```python
+engine = create_async_engine(
+    "sqlite+aiosqlite:///./data/database.db"
+)
+
+async def init_db():
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+```
+
+✅ Wichtigste Erkenntnis:
+
+*   `AsyncEngine` ≠ `create_all(engine)`
+*   DDL **muss über `conn.run_sync()` laufen**
+
+***
+
+### 3️⃣ **Warum ein eigener `/data`‑Ordner?**
+
+Problem:
+
+    sqlite3.OperationalError: unable to open database file
+
+Ursache:
+
+*   SQLite braucht Schreibrechte
+*   `/app` ist ein Code‑Volume → problematisch
+
+Lösung:
+
+```yaml
+volumes:
+  - ./data:/app/data
+```
+
+👉 **Best Practice für Container + SQLite**
+
+***
+
+## ⚡ FastAPI Startup‑Logik (final)
+
+```python
+@app.on_event("startup")
+async def on_startup():
+    await init_db()
+    EventBus.add_middleware(log_event)
+    EventBus.add_middleware(persist_event)
+```
+
+✅ Wichtige Fixes:
+
+*   `FastAPI` korrekt importiert
+*   `init_db` **async korrekt aufgerufen**
+*   alle Abhängigkeiten explizit importiert
+
+***
+
+## 🐳 Docker-Setup (Kurzfassung)
+
+### Backend
+
+*   wird per `uvicorn main:app --host 0.0.0.0`
+*   Port **8000 nur intern** (`expose`)
+*   Startet stabil (kein Restart‑Loop mehr)
+
+### Frontend
+
+*   reines NGINX‑Image
+*   serve statische Dateien
+
+### NGINX (Reverse Proxy)
+
+*   `/` → Frontend
+*   `/api/*` → `backend:8000/*`
+*   **keine CORS‑Probleme**
+*   bereit für HTTPS
+
+### docker-compose Prinzip
+
+*   **ein Projekt**
+*   **ein Netzwerk**
+*   **klar getrennte Services**
+*   **ein Einstiegspunkt**
+
+***
+
+## ✅ Aktueller Funktionsstatus
+
+✅ `docker ps`  
+✅ Backend **Up**  
+✅ Frontend **Up**  
+✅ NGINX **Up**  
+✅ Datenbank wird angelegt  
+✅ `/api` erreichbar  
+✅ keine 502‑Fehler  
+✅ saubere Logs
+
+***
+
+## 🚀 Warum dieser Stand „richtig gut“ ist
+
+*   💡 keine Hacks
+*   📦 produktionsnahe Struktur
+*   🔒 Backend nicht direkt exposed
+*   🔁 async‑fähig
+*   🧩 leicht erweiterbar (Postgres, Auth, KI, etc.)
+*   🌐 vorbereitet für HTTPS & Deployment
+
+***
+
+## ➜ Wie können wir jetzt weitermachen?
+
+Typische nächste Schritte wären z.B.:
+
+1.  **Schritt C: HTTPS mit Certbot**
+2.  API‑Dokumentation & OpenAPI nutzen
+3.  Auth komplettieren (JWT Refresh etc.)
+4.  SQLite → Postgres migrieren
+5.  Deployment auf VPS / Server
+6.  Test‑Setup (pytest / Testcontainers)
+
+Sag einfach:
+👉 *„Weiter mit …“*  
+und wir gehen strukturiert weiter 💪

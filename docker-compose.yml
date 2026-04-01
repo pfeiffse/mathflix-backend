@@ -1,0 +1,65 @@
+services:
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+    image: unterrichtsplanung-app-backend
+    container_name: unterrichtsplanung-app-backend
+    command:
+      - uvicorn
+      - main:app
+      - --app-dir
+      - /app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    volumes:
+      - ./app:/app
+      - ./data:/app/data
+    expose:
+      - "8000"
+    networks:
+      default:
+        aliases:
+          - backend
+    restart: always
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend/Dockerfile
+    image: unterrichtsplanung-app-frontend
+    container_name: unterrichtsplanung-app-frontend
+    expose:
+      - "80"
+    restart: always
+
+  nginx:
+    build:
+      context: ./docker/nginx
+      dockerfile: Dockerfile
+    image: unterrichtsplanung-app-nginx
+    container_name: unterrichtsplanung-app-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./frontend:/usr/share/nginx/html
+      - ./docker/nginx/certbot/www:/var/www/certbot
+      - ./docker/nginx/certbot/conf:/etc/letsencrypt
+    depends_on:
+      - backend
+      - frontend
+    restart: always
+
+  certbot:
+    image: certbot/certbot
+    container_name: unterrichtsplanung-app-certbot
+    volumes:
+      - ./docker/nginx/certbot/www:/var/www/certbot
+      - ./docker/nginx/certbot/conf:/etc/letsencrypt
+    entrypoint: >
+      sh -c "trap exit TERM;
+             sleep infinity"
